@@ -1,0 +1,1 @@
+ALTER TABLE whisky_product_category_mapping ADD COLUMN whisky_product_id BIGINT;
