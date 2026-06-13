@@ -12,6 +12,8 @@
 
 클라이언트가 서버에서 Presigned URL을 발급받아 S3로 직접 업로드하도록 전환하고, 업로드된 이미지는 Lambda에서 WebP로 변환하는 파이프라인으로 분리했습니다. API 서버는 업로드 권한 발급과 메타데이터 처리만 담당하고, 대용량 파일 본문은 S3와 Lambda가 처리하도록 역할을 나눴습니다.
 
+버킷은 origin/public 2개로 분리했습니다. 클라이언트는 private origin 버킷에 업로드하고, S3 PUT 이벤트로 실행된 Lambda가 리사이즈·WebP 변환 후 CloudFront가 바라보는 public 버킷에 저장합니다. 단일 버킷 구조는 Lambda 출력 PUT이 다시 같은 Lambda를 트리거할 수 있어 제외했습니다. 처리 완료 상태는 서버 DB에 별도 `processStatus`를 두지 않고, 클라이언트가 발급 응답의 CDN URL을 polling해 확인하도록 단순화했습니다.
+
 ```mermaid
 flowchart LR
     C[클라이언트] -->|1. Presigned URL 요청| API[API 서버<br/>권한 발급 + 메타데이터만]
@@ -30,9 +32,12 @@ CloudFront 비용 기준 전후 추이:
 
 ![CloudFront 비용 추이](./assets/cloudfront-cost-trend.png)
 
-## 관련 코드 (`code/`)
+## 관련 코드 (`src/main/java`)
+
+운영 레포에서 deep-dive 범위만 발췌했습니다 (범위 외 메서드는 생략 주석으로 표시).
 
 | 파일 | 역할 |
 |------|------|
-| `FileController.java` | Presigned URL 발급 API |
-| `FileService.java` | Presigned URL 생성 + 파일 메타데이터 처리 |
+| [`FileController.java`](../src/main/java/be/weskey/module/member/file/controller/FileController.java) | Presigned URL 발급 API |
+| [`FileService.java`](../src/main/java/be/weskey/module/member/file/service/FileService.java) | Presigned URL 생성 + 파일 메타데이터 처리 |
+| [`S3PresignedUrlService.java`](../src/main/java/be/weskey/shared/aws/service/S3PresignedUrlService.java) | origin 버킷 업로드용 Presigned URL 발급 + public 버킷 WebP URL 생성 |
