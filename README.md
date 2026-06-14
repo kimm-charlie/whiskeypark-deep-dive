@@ -26,12 +26,14 @@ Java 17 · Spring Boot 3.2 · MySQL · Redis · JPA/QueryDSL · AWS (EC2·RDS·S
 ## 디렉토리 구조
 
 ```
-0X-topic/README.md   # 문제 → 설계 판단 → 해결 → 결과·검증 (관련 코드 링크 포함)
+0X-topic/README.md   # 한 줄 요약 + 흐름 + 코드 맵(설계 포인트 → 파일). 상세 서술은 deep-dive 자료에
 0X-topic/code/       # SQL 마이그레이션 발췌
 src/main/java/       # 운영 레포에서 발췌한 Java 코드 (실제 패키지 경로 유지)
 ```
 
-발췌 코드는 각 deep-dive에서 다루는 핵심 흐름만 남겼습니다 (범위 외 메서드는 생략 주석으로 표시).
+각 항목 README는 **"이 설계가 코드의 어디에 있는지"** 안내하는 코드 맵입니다.
+문제 발견·대안 검토·검증 과정 등 상세 서술은 deep-dive 자료(Notion)에 정리돼 있습니다.
+발췌 코드는 각 주제의 핵심 흐름만 남겼습니다 (범위 외 메서드는 생략 주석으로 표시).
 
 ## 코드 탐색 (IDE)
 
