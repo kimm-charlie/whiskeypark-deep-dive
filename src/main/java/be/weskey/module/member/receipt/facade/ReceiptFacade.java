@@ -42,7 +42,7 @@ public class ReceiptFacade {
 	private final TransactionTemplate transactionTemplate;
 
 	/**
-	 * 주문 저장 — 외부 Toss 승인을 StoreStock 비관락 트랜잭션 밖에서 수행해 락 점유 시간을 단축한다(G6).
+	 * 주문 저장 — 외부 Toss 승인을 StoreStock 비관락 트랜잭션 밖에서 수행해 락 점유 시간을 단축한다.
 	 * 분리로 잃는 자동 롤백은 보상(saga) + 기록 선행으로 보완한다.
 	 *
 	 * 사전검증(밖) → TX1(주문서·재고 차감) → approve(밖, Toss 승인) → TX2(결제정보 저장·연결·마일리지 차감·이벤트)
@@ -68,7 +68,7 @@ public class ReceiptFacade {
 		Receipt receipt = transactionTemplate.execute(status -> receiptService.prepareOrder(member, request, totalPrice));
 		Long receiptId = receipt.getId();
 
-		// 3. approve: Toss 승인은 락 밖에서 수행한다(G6 핵심). 실패하면 Toss 미승인이므로 결제 취소 없이 주문 흔적만 보상 삭제한다.
+		// 3. approve: Toss 승인은 락 밖에서 수행한다. 실패하면 Toss 미승인이므로 결제 취소 없이 주문 흔적만 보상 삭제한다.
 		ResponseEntity<TossPaymentPaymentApprovalResponse> approvalResponse;
 		try {
 			approvalResponse = tossPaymentService.approvePayment(request.getTosspaymentInfo(), member);

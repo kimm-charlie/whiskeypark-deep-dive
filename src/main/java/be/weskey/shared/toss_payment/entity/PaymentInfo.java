@@ -18,4 +18,9 @@ public class PaymentInfo {
 	private Long id;
 	@Column(unique = true)
 	private String paymentKey;
+
+	// [stub] 운영에서는 누적 취소액·잔여 취소가능액·PG 동기화 플래그(isPgSynced)를 갱신한다. deep-dive 범위에선 시그니처만 둔다.
+	public void updateCancellationInfo(Long canceledAmount, boolean hasRemainingActiveOutbox) {
+		// no-op stub
+	}
 }

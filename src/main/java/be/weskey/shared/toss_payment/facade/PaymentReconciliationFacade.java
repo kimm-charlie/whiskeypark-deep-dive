@@ -13,7 +13,7 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * PG 대사 트랜잭션 경계. Toss 거래내역 조회(최대 60초)는 DB 트랜잭션 밖(NOT_SUPPORTED)에서 수행하고,
- * orphan 적재만 TransactionTemplate 으로 건별 짧은 트랜잭션을 연다 — 외부 호출 동안 커넥션을 잡지 않기 위함(G6 분리와 동일 원칙).
+ * orphan 적재만 TransactionTemplate 으로 건별 짧은 트랜잭션을 연다 — 외부 호출 동안 커넥션을 잡지 않기 위함(결제 분리와 동일 원칙).
  */
 @Service
 @Transactional(readOnly = true)

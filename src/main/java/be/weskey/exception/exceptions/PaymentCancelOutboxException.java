@@ -5,11 +5,9 @@ import org.springframework.http.HttpStatus;
 import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
-public enum FileException implements CustomException {
+public enum PaymentCancelOutboxException implements CustomException {
 
-	INVALID_DIRECTORY_TYPE(HttpStatus.BAD_REQUEST, "유효하지 않은 디렉토리 타입입니다.", "FILE_001"),
-	PRESIGNED_URL_GENERATION_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "Presigned URL 생성에 실패했습니다.", "FILE_002"),
-	NOT_FOUND(HttpStatus.NOT_FOUND, "파일을 찾을 수 없습니다.", "FILE_003");
+	NOT_FOUND(HttpStatus.NOT_FOUND, "결제 취소 outbox 를 찾을 수 없습니다.", "PAYMENT_CANCEL_OUTBOX_001");
 
 	private final HttpStatus status;
 	private final String message;

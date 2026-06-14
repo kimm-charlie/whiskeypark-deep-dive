@@ -1,9 +1,17 @@
-// [stub] IDE 탐색·컴파일용 최소 스텁 — 운영 코드 아님
 package be.weskey.exception;
 
+import be.weskey.exception.exceptions.CustomException;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+
+@Getter
+@RequiredArgsConstructor
 public class CustomRuntimeException extends RuntimeException {
 
-	public CustomRuntimeException(Enum<?> exceptionType) {
-		super(exceptionType.name());
+	private final CustomException customException;
+
+	@Override
+	public String getMessage() {
+		return customException.getErrorMessage();
 	}
 }

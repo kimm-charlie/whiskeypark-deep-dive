@@ -84,7 +84,7 @@ public class ReceiptService {
 		// 2. (마일리지 검증은 결제 전 Facade 사전검증, 차감은 결제 성공 후 TX2 에서 수행한다)
 
 		// 3. 재고 락 점유 시간 측정 시작 — StoreStock 비관락 선점 직전부터 트랜잭션 커밋(락 해제) 시점까지를
-		//    receipt.save.lock 으로 기록한다. (G6 분리 전: Toss 호출까지 포함된 락 점유 / 분리 후: DB 작업만)
+		//    receipt.save.lock 으로 기록한다. (분리 전: Toss 호출까지 포함된 락 점유 / 분리 후: DB 작업만)
 		//    계측이 주문 흐름을 깨지 않도록 트랜잭션 동기화가 활성일 때만 등록한다.
 		if (TransactionSynchronizationManager.isSynchronizationActive()) {
 			Timer.Sample lockHoldSample = Timer.start(meterRegistry);

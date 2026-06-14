@@ -1,24 +1,39 @@
-// [stub] IDE 탐색·컴파일용 최소 스텁 — 운영 코드 아님
 package be.weskey.shared.toss_payment.service;
 
 import java.util.List;
 
 import org.springframework.stereotype.Service;
 
+import be.weskey.exception.CustomRuntimeException;
+import be.weskey.exception.exceptions.PaymentCancelOutboxException;
 import be.weskey.shared.toss_payment.entity.PaymentCancelOutbox;
+import be.weskey.shared.toss_payment.repository.PaymentCancelOutboxRepository;
+import lombok.RequiredArgsConstructor;
 
 @Service
+@RequiredArgsConstructor
 public class PaymentCancelOutboxQueryService {
 
+	private final PaymentCancelOutboxRepository paymentCancelOutboxRepository;
+
 	public List<Long> findPendingIds() {
-		throw new UnsupportedOperationException("stub");
+		return paymentCancelOutboxRepository.findPendingIds();
 	}
 
-	public PaymentCancelOutbox findById(Long outboxId) {
-		throw new UnsupportedOperationException("stub");
+	public List<PaymentCancelOutbox> findActiveWithoutPaymentInfo() {
+		return paymentCancelOutboxRepository.findActiveWithoutPaymentInfo();
+	}
+
+	public List<PaymentCancelOutbox> findActiveByPaymentInfoIds(List<Long> paymentInfoIds) {
+		return paymentCancelOutboxRepository.findActiveByPaymentInfoIds(paymentInfoIds);
+	}
+
+	public PaymentCancelOutbox findById(Long id) {
+		return paymentCancelOutboxRepository.findById(id)
+			.orElseThrow(() -> new CustomRuntimeException(PaymentCancelOutboxException.NOT_FOUND));
 	}
 
 	public boolean existsByPaymentKey(String paymentKey) {
-		throw new UnsupportedOperationException("stub");
+		return paymentCancelOutboxRepository.existsByPaymentKey(paymentKey);
 	}
 }
