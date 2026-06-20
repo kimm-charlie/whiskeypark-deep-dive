@@ -24,10 +24,8 @@ public interface PaymentCancelOutboxRepository extends JpaRepository<PaymentCanc
 	 * 다중 worker(스케줄러 인스턴스 2개 이상) 환경에서 동일 row 중복 처리를 막기 위한 조건부 선점.
 	 * status=PENDING 일 때만 PROCESSING 으로 전환하고 영향 row 수를 반환한다.
 	 * 0 이면 다른 worker 가 이미 선점한 것으로 보고 호출자는 즉시 스킵한다.
-	 * clearAutomatically=true 필수 — 이 벌크 UPDATE 직후 호출자(Facade)가 같은 outbox 를 findById 로 재조회하므로,
-	 * PC 에 남은 PENDING 스냅샷을 clear 해야 fresh PROCESSING 을 읽어 이후 markRetry(PENDING) 가 dirty 로 잡힌다.
 	 */
-	@Modifying(clearAutomatically = true)
+	@Modifying
 	@Query("""
 			UPDATE PaymentCancelOutbox o
 			SET o.status = be.weskey.shared.toss_payment.entity.PaymentCancelOutboxStatus.PROCESSING,

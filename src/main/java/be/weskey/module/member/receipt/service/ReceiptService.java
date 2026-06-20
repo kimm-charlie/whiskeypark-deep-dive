@@ -5,9 +5,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -57,7 +56,6 @@ public class ReceiptService {
 	private final MemberQueryService memberQueryService;
 	private final ReceiptValidator receiptValidator;
 	private final PaymentInfoQueryService paymentInfoQueryService;
-	private final MeterRegistry meterRegistry;
 
 	/**
 	 * 결제 도메인의 자연 idempotency key 인 paymentKey 기반 사전 체크.
@@ -75,28 +73,17 @@ public class ReceiptService {
 	}
 
 	// 주문 준비(TX1): 주문서 저장 + recipient/storeStockReceiptMapping 저장(재고 락·차감). Toss 결제·마일리지 차감은 결제 성공 후(TX2)에 처리한다.
-	public Receipt prepareOrder(Member member, ReceiptSaveRequest receiptSaveRequest, long totalPrice) {
+	public Receipt prepareOrder(Member member, ReceiptSaveRequest receiptSaveRequest, long totalPrice,
+		AtomicLong lockNanos) {
 
 		// 1. 주문서 저장
 		Receipt receipt = receiptCommandService.save(
 			receiptSaveRequest.toReceiptEntity(member, totalPrice, receiptSaveRequest.getPaymentTotalPrice()));
 
-		// 2. (마일리지 검증은 결제 전 Facade 사전검증, 차감은 결제 성공 후 TX2 에서 수행한다)
+		// 2. 락 점유 시간 측정 시작 — 비관락 선점 직전부터 트랜잭션 종료까지
+		startLockHoldMeasurement(lockNanos);
 
-		// 3. 재고 락 점유 시간 측정 시작 — StoreStock 비관락 선점 직전부터 트랜잭션 커밋(락 해제) 시점까지를
-		//    receipt.save.lock 으로 기록한다. (분리 전: Toss 호출까지 포함된 락 점유 / 분리 후: DB 작업만)
-		//    계측이 주문 흐름을 깨지 않도록 트랜잭션 동기화가 활성일 때만 등록한다.
-		if (TransactionSynchronizationManager.isSynchronizationActive()) {
-			Timer.Sample lockHoldSample = Timer.start(meterRegistry);
-			TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-				@Override
-				public void afterCommit() {
-					lockHoldSample.stop(meterRegistry.timer("receipt.save.lock"));
-				}
-			});
-		}
-
-		// 4. recipient 및 storeStockReceiptMapping 저장 (이 안에서 StoreStock 비관락 선점 + 재고 차감)
+		// 3. recipient 및 storeStockReceiptMapping 저장 (이 안에서 StoreStock 비관락 선점 + 재고 차감)
 		saveRecipientsAndStoreStockMappings(receipt, receiptSaveRequest.getReceiptRequests(), false);
 
 		return receipt;
@@ -105,14 +92,17 @@ public class ReceiptService {
 	// Toss 결제 승인(Facade) 후 TX2: receipt 에 결제정보 연결 + 마일리지 차감 + 장바구니 삭제.
 	// 멀티 트랜잭션 분리로 receipt·member 는 이전 트랜잭션에서 분리(detached)되므로 이 트랜잭션에서 재조회해 영속 상태로 다룬다.
 	public void completeOrder(Long receiptId, Long memberId, PaymentInfo paymentInfo,
-		ReceiptSaveRequest receiptSaveRequest) {
+		ReceiptSaveRequest receiptSaveRequest, AtomicLong lockNanos) {
 		Receipt receipt = receiptQueryService.findById(receiptId);
 		receipt.updatedPaymentInfo(paymentInfo);
 
-		// 마일리지 차감(검증은 결제 전 Facade 사전검증에서 완료). 결제 성공 후에만 차감하므로 실패 시 환급이 필요 없다.
-		// awardMileage 의 dirty checking 을 위해 영속 상태의 member 가 필요할 때만 재조회한다.
+		// 마일리지 차감 — 비관락으로 member 를 선점한 뒤 재검증 후 차감한다.
+		// 사전검증(Facade)은 빠른 실패용이고, 동시 요청 race 에서의 정합성은 여기서 보장한다.
 		if (receiptSaveRequest.getMileage() > 0) {
-			Member member = memberQueryService.findById(memberId);
+			startLockHoldMeasurement(lockNanos);
+			Member member = memberQueryService.findByIdWithLock(memberId);
+			receiptValidator.validateMileageUsage(receiptSaveRequest.getReceiptRequests(),
+				receiptSaveRequest.getMileage(), member, receiptSaveRequest.getPaymentTotalPrice());
 			deductMileage(member, receiptSaveRequest.getReceiptRequests(), receiptSaveRequest.getMileage());
 		}
 
@@ -138,7 +128,7 @@ public class ReceiptService {
 			.filter(mapping -> mapping.getStoreStock().getId().equals(storeStock.getId()))
 			.forEach(mapping -> storeStock.increaseQuantity(mapping.getQuantity())));
 
-		// 2. 주문 흔적 하드 삭제 — FK 의존상 mapping → pickup → recipient → receipt 순서로 삭제한다.
+		// 2. 주문 흔적 하드 삭제 — mapping → pickup → recipient → receipt 순서로 삭제한다.
 		List<PickUp> pickUps = pickUpQueryService.findAllByReceiptId(receiptId);
 		List<Recipient> recipients = storeStockReceiptMappings.stream()
 			.map(StoreStockReceiptMapping::getRecipient)
@@ -226,13 +216,29 @@ public class ReceiptService {
 		return storeStockReceiptMappings;
 	}
 
-	public long calculateTotalPrice(ReceiptSaveRequest receiptSaveRequest) {
-		return calculateTotalPrice(receiptSaveRequest.getReceiptRequests());
+	private void startLockHoldMeasurement(AtomicLong lockNanos) {
+		if (lockNanos == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
+			return;
+		}
+
+		long lockStart = System.nanoTime();
+		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+			@Override
+			public void afterCompletion(int status) {
+				lockNanos.addAndGet(System.nanoTime() - lockStart);
+			}
+		});
 	}
 
 	public long calculateTotalPrice(List<ReceiptRequest> receiptRequests) {
 		return receiptRequests.stream()
 			.mapToLong(this::calculateReceiptTotal)
+			.sum();
+	}
+
+	private long calculateReceiptTotal(ReceiptRequest receiptRequest) {
+		return receiptRequest.getOrderStoreStocks().stream()
+			.mapToLong(s -> s.getPrice() * s.getQuantity())
 			.sum();
 	}
 
@@ -265,16 +271,6 @@ public class ReceiptService {
 			StoreStock storeStockEntity = storeStockMap.get(storeStock.getId());
 			storeStockEntity.decreaseQuantity(storeStock.getQuantity());
 		});
-	}
-
-	private long calculateReceiptTotal(ReceiptRequest receiptRequest) {
-		return receiptRequest.getOrderStoreStocks().stream()
-			.mapToLong(this::calculateStockTotal)
-			.sum();
-	}
-
-	private long calculateStockTotal(StoreStockReceiptMappingRequest storeStockRequest) {
-		return storeStockRequest.getPrice() * storeStockRequest.getQuantity();
 	}
 
 	// ... (deep-dive 범위 외 생략: 주문 조회 findAll/findDetail, 취소·수수료 계산 cancel/findCancellationFee,

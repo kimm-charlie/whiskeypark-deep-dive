@@ -61,7 +61,8 @@ public class TossPaymentCancelService {
 	public void retryPendingEntireCancellation(PaymentCancelOutbox outbox) {
 		// 호출자(Facade) 에서 markProcessingIfPending 으로 이미 PROCESSING 으로 전환됐다고 가정한다.
 		try {
-			requestEntireCancel(outbox.getPaymentKey(), outbox.getCancelReason());
+			TossPaymentCancelEntirelyRequest request = TossPaymentCancelEntirelyRequest.from(outbox.getCancelReason());
+			tossPaymentClient.paymentCancelEntirely(outbox.getPaymentKey(), request, tossPaymentAuthProvider.getAuthorization());
 		} catch (CustomRuntimeException e) {
 			// 크래시로 Toss 취소 성공 직후 DB 커밋 전에 죽은 뒤 재시도하면 Toss 가 ALREADY_CANCELED 를 반환한다.
 			// 이미 원하는 종료상태(취소됨)에 도달했으므로 성공으로 간주한다(멱등). FAILED 오탐 방지.
@@ -85,12 +86,6 @@ public class TossPaymentCancelService {
 			.anyMatch(active -> !active.getId().equals(outboxId));
 	}
 
-	// 전체취소(ENTIRE) Toss 호출. 예외 처리는 호출처가 케이스별로 담당한다.
-	private void requestEntireCancel(String paymentKey, String cancelReason) {
-		TossPaymentCancelEntirelyRequest request = TossPaymentCancelEntirelyRequest.from(cancelReason);
-		tossPaymentClient.paymentCancelEntirely(paymentKey, request, tossPaymentAuthProvider.getAuthorization());
-	}
-
 	// 재시도 실패 공통 처리 — attempt 갱신 + MAX 도달 시 FAILED 마커 로그. (부분/전체 공통)
 	private void handleRetryFailure(PaymentCancelOutbox outbox, String errorMessage) {
 		outbox.markRetry(errorMessage);
@@ -99,9 +94,6 @@ public class TossPaymentCancelService {
 			log.error("[PAYMENT_CANCEL_OUTBOX_PERMANENTLY_FAILED] outboxId: {} receiptId: {} trigger: {} paymentKey: {} paymentInfoId: {} 예외: {}",
 				outbox.getId(), outbox.getReceiptId(), outbox.getCancelTrigger(), outbox.getPaymentKey(),
 				outbox.getPaymentInfoId(), errorMessage);
-		} else {
-			log.error("결제 취소 재시도 실패 outboxId: {} attempt: {} 예외: {}", outbox.getId(), outbox.getAttemptCount(),
-				errorMessage);
 		}
 	}
 }

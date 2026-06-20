@@ -27,8 +27,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PaymentReconciliationService {
 
-	// 직전 36시간을 겹쳐 조회해 자정 경계 누락을 방지한다(멱등 적재라 중복 조회는 무해).
-	private static final int RECONCILE_WINDOW_HOURS = 36;
+	// 직전 48시간을 겹쳐 조회해 1회 실행 누락 시에도 공백 없이 커버한다(멱등 적재라 중복 조회는 무해).
+	// 04:00 매일 실행 기준: 48시간 이전 실행이 커버한 구간과 정확히 맞닿아 누락 구간이 생기지 않는다.
+	private static final int RECONCILE_WINDOW_HOURS = 48;
 	// 거래내역 조회는 최대 60초 소요될 수 있어 타임아웃을 넉넉히 잡는다.
 	private static final int TRANSACTION_TIMEOUT_SECONDS = 60;
 	private static final int PAGE_SIZE = 100;

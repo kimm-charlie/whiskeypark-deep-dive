@@ -2,7 +2,10 @@ package be.weskey.module.member.receipt.facade;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +16,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import be.weskey.module.member.member.entity.Member;
 import be.weskey.module.member.member.service.MemberQueryService;
+import be.weskey.module.member.member.validator.MemberValidator;
 import be.weskey.module.member.receipt.dto.request.ReceiptRequest;
 import be.weskey.module.member.receipt.dto.request.ReceiptSaveRequest;
 import be.weskey.module.member.receipt.entity.Receipt;
@@ -36,10 +40,12 @@ public class ReceiptFacade {
 	private final ReceiptValidator receiptValidator;
 	private final ReceiptService receiptService;
 	private final MemberQueryService memberQueryService;
+	private final MemberValidator memberValidator;
 	private final TossPaymentService tossPaymentService;
 	private final PaymentCancelOutboxCommandService paymentCancelOutboxCommandService;
 	private final ApplicationEventPublisher eventPublisher;
 	private final TransactionTemplate transactionTemplate;
+	private final MeterRegistry meterRegistry;
 
 	/**
 	 * 주문 저장 — 외부 Toss 승인을 StoreStock 비관락 트랜잭션 밖에서 수행해 락 점유 시간을 단축한다.
@@ -53,7 +59,7 @@ public class ReceiptFacade {
 	public Long save(Long memberId, ReceiptSaveRequest request) {
 		// 1. 사전검증 (인증 → 멱등 응답 분기 → 결제금액·마일리지 검증). 멱등이면 기존 receiptId 로 즉시 응답.
 		Member member = memberQueryService.findById(memberId);
-		receiptValidator.validateAuthenticated(member);
+		memberValidator.validateAuthenticated(member);
 
 		Optional<Long> idempotentReceiptId = receiptService.findIdempotentReceiptId(memberId,
 			request.getTosspaymentInfo().getPaymentKey());
@@ -61,11 +67,13 @@ public class ReceiptFacade {
 			return idempotentReceiptId.get();
 		}
 
-		long totalPrice = receiptService.calculateTotalPrice(request);
-		receiptValidator.validatePaymentAndMileage(request, member, totalPrice);
+		long totalPrice = receiptService.calculateTotalPrice(request.getReceiptRequests());
+		receiptValidator.validateBeforePrepareOrder(request, member, totalPrice);
+		AtomicLong lockNanos = new AtomicLong();
 
 		// 2. TX1: 주문서 저장 + 재고 락·차감 (외부 호출 없는 짧은 락 트랜잭션)
-		Receipt receipt = transactionTemplate.execute(status -> receiptService.prepareOrder(member, request, totalPrice));
+		Receipt receipt = transactionTemplate.execute(status ->
+			receiptService.prepareOrder(member, request, totalPrice, lockNanos));
 		Long receiptId = receipt.getId();
 
 		// 3. approve: Toss 승인은 락 밖에서 수행한다. 실패하면 Toss 미승인이므로 결제 취소 없이 주문 흔적만 보상 삭제한다.
@@ -76,21 +84,26 @@ public class ReceiptFacade {
 			compensateQuietly(receiptId);
 			throw e;
 		}
-
 		// 4. TX2: 결제정보 저장·주문 확정·이벤트. 실패 시 보상(+상황별 Toss 취소), race 면 승자 receiptId 반환.
-		return completePayment(receiptId, memberId, member, approvalResponse, request);
+		return completePayment(receiptId, memberId, member, approvalResponse, request, lockNanos);
 	}
 
 	// TX2: PaymentInfo 저장 + 주문 확정(연결·마일리지·장바구니) + 이벤트 발행.
 	// 이벤트는 NOT_SUPPORTED 경계라 AFTER_COMMIT 발화를 위해 반드시 이 트랜잭션 안에서 발행한다.
 	private Long completePayment(Long receiptId, Long memberId, Member member,
-		ResponseEntity<TossPaymentPaymentApprovalResponse> approvalResponse, ReceiptSaveRequest request) {
+		ResponseEntity<TossPaymentPaymentApprovalResponse> approvalResponse, ReceiptSaveRequest request,
+		AtomicLong lockNanos) {
 		try {
-			transactionTemplate.executeWithoutResult(status -> {
-				PaymentInfo paymentInfo = tossPaymentService.savePaymentInfo(approvalResponse, member);
-				receiptService.completeOrder(receiptId, memberId, paymentInfo, request);
-				eventPublisher.publishEvent(ReceiptRequestedEvent.of(receiptId, memberId, extractStoreIds(request)));
-			});
+			try {
+				transactionTemplate.executeWithoutResult(status -> {
+					PaymentInfo paymentInfo = tossPaymentService.savePaymentInfo(approvalResponse, member);
+					receiptService.completeOrder(receiptId, memberId, paymentInfo, request, lockNanos);
+					eventPublisher.publishEvent(ReceiptRequestedEvent.of(receiptId, memberId, extractStoreIds(request)));
+				});
+			} finally {
+				meterRegistry.timer("receipt.save.lock")
+					.record(lockNanos.get(), TimeUnit.NANOSECONDS);
+			}
 			return receiptId;
 		} catch (DataIntegrityViolationException e) {
 			// payment_info UNIQUE 위반 = 동시 race. 승자와 같은 결제를 공유하므로 Toss 취소 시 승자 결제까지 환불됨 → 취소 금지.

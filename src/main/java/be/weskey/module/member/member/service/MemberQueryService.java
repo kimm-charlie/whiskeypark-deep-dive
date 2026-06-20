@@ -11,4 +11,8 @@ public class MemberQueryService {
 	public Member findById(Long memberId) {
 		throw new UnsupportedOperationException("stub");
 	}
+
+	public Member findByIdWithLock(Long memberId) {
+		throw new UnsupportedOperationException("stub");
+	}
 }
