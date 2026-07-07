@@ -1,10 +1,19 @@
 # WhiskeyPark — Backend Deep-dive
 
-주류 커뮤니티·커머스 플랫폼 **WhiskeyPark**(누적 거래액 약 10억 원) 백엔드에서 맡았던 핵심 설계 4가지를 정리한 자료입니다.
+주류 커뮤니티·커머스 플랫폼 **WhiskeyPark**(상품 판매가 기준 누적 판매액 약 10억 원) 백엔드에서 맡았던 핵심 설계 4가지를 정리한 자료입니다.
 
 > ⚠️ WhiskeyPark은 전체 코드를 공개하는 대신,
 > 각 주제의 **설계 문서 + 실제 운영 코드 발췌**를 항목별로 정리했습니다.
 > 문서에는 문제를 어떻게 발견했는지, 어떤 대안을 검토했는지, 어떻게 검증했는지를 담았습니다.
+
+## 이력서 항목별 바로가기
+
+| 이력서 문장 | 설계 문서 | 핵심 코드/근거 |
+|-------------|----------|----------------|
+| 결제 성공 후 주문 누락, 중복 결제 race, Toss 취소 실패에도 복구 가능한 구조 | [01. 주문/결제/재고 트랜잭션 파이프라인](./01-order-payment-pipeline/) | [ReceiptFacade](./src/main/java/be/weskey/module/member/receipt/facade/ReceiptFacade.java), [ReceiptService](./src/main/java/be/weskey/module/member/receipt/service/ReceiptService.java), [PaymentCancelOutbox](./src/main/java/be/weskey/shared/toss_payment/entity/PaymentCancelOutbox.java), [PaymentReconciliationScheduler](./src/main/java/be/weskey/common/scheduler/PaymentReconciliationScheduler.java) |
+| 상품 목록 API p95 1602ms → 80.4ms, p99 2001ms → 193.9ms | [02. 상품 목록 조회 성능 개선](./02-stocks-query-p95/) | [StoreStockQueryDslRepository](./src/main/java/be/weskey/module/member/store_stock/repository/StoreStockQueryDslRepository.java), [V44 category index](./02-stocks-query-p95/code/V44__add_index_to_wpcm_for_stocks_exists.sql), [V56 relation index](./02-stocks-query-p95/code/V56__add_index_to_whisky_product_relation_for_set_category_filter.sql) |
+| Presigned URL + Lambda WebP 변환으로 CloudFront 이미지 전송 비용 약 90% 절감 | [03. 이미지 처리 비용 절감](./03-image-pipeline/) | [FileController](./src/main/java/be/weskey/module/member/file/controller/FileController.java), [FileFacade](./src/main/java/be/weskey/module/member/file/facade/FileFacade.java), [S3PresignedUrlService](./src/main/java/be/weskey/shared/aws/service/S3PresignedUrlService.java), [CloudFront 비용 그래프](./03-image-pipeline/assets/cloudfront-cost-trend.png) |
+| 제품 도메인 통합과 하위호환 마이그레이션 | [04. 제품 도메인 재설계](./04-domain-migration/) | [WhiskyProduct](./src/main/java/be/weskey/module/member/whisky_product/entity/WhiskyProduct.java), [WhiskyProductRelation](./src/main/java/be/weskey/module/member/whisky_product_relation/entity/WhiskyProductRelation.java), [V20~V24 migration](./04-domain-migration/code/) |
 
 ## 목차
 
@@ -19,9 +28,9 @@
 
 Java 17 · Spring Boot 3.2 · MySQL · Redis · JPA/QueryDSL · AWS (EC2·RDS·S3·Lambda·CloudFront) · PG 결제 연동 · Prometheus/Grafana
 
-## 운영 지표 (2026.05, 내부 집계 기준)
+## 운영 지표
 
-- 누적 거래액 약 10억 원 · 누적 가입자 약 1만 명 · MAU 약 4천 명
+- 상품 판매가 기준 누적 판매액 약 10억 원 · 누적 가입자 약 1만 명 · MAU 약 4천 명
 
 ## 디렉토리 구조
 
