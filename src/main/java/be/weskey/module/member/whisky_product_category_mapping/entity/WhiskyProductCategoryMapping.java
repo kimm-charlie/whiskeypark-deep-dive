@@ -7,10 +7,16 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import lombok.Getter;
 
 @Entity
+@Table(indexes = {
+	@Index(name = "idx_wpcm_category_product",
+		columnList = "whisky_product_category_id, whisky_product_id")
+})
 @Getter
 public class WhiskyProductCategoryMapping {
 

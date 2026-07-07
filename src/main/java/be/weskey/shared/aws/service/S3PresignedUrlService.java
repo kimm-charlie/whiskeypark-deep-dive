@@ -23,7 +23,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 @RequiredArgsConstructor
 public class S3PresignedUrlService {
 
-	private static final Duration PRESIGNED_URL_EXPIRATION = Duration.ofMinutes(10);
+	private static final Duration PRESIGNED_URL_EXPIRATION = Duration.ofMinutes(2);
 
 	private final S3Presigner s3Presigner;
 	@Value("${aws.s3.bucket}")

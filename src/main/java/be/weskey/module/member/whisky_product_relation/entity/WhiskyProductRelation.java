@@ -6,10 +6,16 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import lombok.Getter;
 
 @Entity
+@Table(indexes = {
+	@Index(name = "idx_wpr_product_deleted_base",
+		columnList = "product_id, is_deleted, base_product_id")
+})
 @Getter
 public class WhiskyProductRelation {
 

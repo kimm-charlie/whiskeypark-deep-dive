@@ -1,8 +1,8 @@
 # WhiskeyPark — Backend Deep-dive
 
-주류 커뮤니티·커머스 플랫폼 **WhiskeyPark**(누적 거래액 약 10억 원, 운영 중) 백엔드의 핵심 설계 4가지를 정리한 자료입니다.
+주류 커뮤니티·커머스 플랫폼 **WhiskeyPark**(누적 거래액 약 10억 원) 백엔드에서 맡았던 핵심 설계 4가지를 정리한 자료입니다.
 
-> ⚠️ WhiskeyPark은 현재 운영 중인 서비스라 전체 코드를 공개하는 대신,
+> ⚠️ WhiskeyPark은 전체 코드를 공개하는 대신,
 > 각 주제의 **설계 문서 + 실제 운영 코드 발췌**를 항목별로 정리했습니다.
 > 문서에는 문제를 어떻게 발견했는지, 어떤 대안을 검토했는지, 어떻게 검증했는지를 담았습니다.
 
@@ -10,14 +10,14 @@
 
 | # | 주제 | 핵심 결과 |
 |---|------|----------|
-| [01](./01-order-payment-pipeline/) | 주문/결제/재고 트랜잭션 파이프라인 | 락 점유 구간 분리: 초 단위 → 수십 ms + outbox/PG 대사 복구 안전망 |
-| [02](./02-stocks-query-p95/) | 상품 목록 조회 성능 개선 | p95 1602ms → 80.4ms (**19.9배**), p99 2001ms → 193.9ms (10.3배) |
+| [01](./01-order-payment-pipeline/) | 주문/결제/재고 트랜잭션 파이프라인 | 외부 PG 호출을 재고 락 트랜잭션 밖으로 분리 + 보상/재시도/대사 복구 안전망 |
+| [02](./02-stocks-query-p95/) | 상품 목록 조회 성능 개선 | p95 1602ms → 80.4ms (**19.9배**), worst-case 부하 테스트로 다음 병목 기준까지 확인 |
 | [03](./03-image-pipeline/) | 이미지 처리 비용 절감 | Presigned URL + Lambda WebP 전환으로 CDN 전송 비용 약 **90% 절감** |
-| [04](./04-domain-migration/) | 제품 도메인 통합과 하위호환 마이그레이션 | 12개 레거시 테이블 단계적 제거, orphan 932건 보존 이관, 데이터 유실·오매핑 0건 검산 후 배포 |
+| [04](./04-domain-migration/) | 제품 도메인 통합과 하위호환 마이그레이션 | 정보 기반 주류 정보와 상품 기반 주류 정보를 통합하고, 기존 앱 응답을 유지하며 단계적 이관 |
 
 ## 기술 스택
 
-Java 17 · Spring Boot 3.2 · MySQL · Redis · JPA/QueryDSL · AWS (EC2·RDS·S3·Lambda·CloudFront) · Toss Payments · Prometheus/Grafana
+Java 17 · Spring Boot 3.2 · MySQL · Redis · JPA/QueryDSL · AWS (EC2·RDS·S3·Lambda·CloudFront) · PG 결제 연동 · Prometheus/Grafana
 
 ## 운영 지표 (2026.05, 내부 집계 기준)
 
