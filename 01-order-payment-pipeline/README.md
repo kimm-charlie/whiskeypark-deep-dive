@@ -11,8 +11,8 @@
 ## 흐름
 
 ```
-사전검증 → TX1(주문서+재고차감, 짧은 커밋) → PG 승인(트랜잭션 밖)
-→ TX2(PaymentInfo 확정) → 실패 시 TX3 보상(하드삭제+재고복원) → PG 취소 실패 시 outbox
+사전검증 → TX1(주문서+재고·마일리지 차감, 짧은 커밋) → PG 승인(트랜잭션 밖)
+→ TX2(PaymentInfo 확정) → 실패 시 TX3 보상(하드삭제+재고·마일리지 복원) → PG 취소 실패 시 outbox
 ```
 
 ## 코드 맵 (설계 포인트 → 파일)
@@ -22,7 +22,7 @@ IDE 탐색 방법은 [루트 README](../README.md#코드-탐색-ide) 참고. 발
 | 설계 포인트 | 코드 |
 |------------|------|
 | 사전검증 → TX1 → 승인 → TX2 → TX3 오케스트레이션 | [`ReceiptFacade`](../src/main/java/be/weskey/module/member/receipt/facade/ReceiptFacade.java) |
-| TX1/TX2/TX3 본문 (재고 차감·확정·보상 하드삭제) | [`ReceiptService`](../src/main/java/be/weskey/module/member/receipt/service/ReceiptService.java) |
+| TX1/TX2/TX3 본문 (재고·마일리지 차감·확정·보상 하드삭제/환급) | [`ReceiptService`](../src/main/java/be/weskey/module/member/receipt/service/ReceiptService.java) |
 | 동시결제 race (paymentKey UNIQUE → 승자 ID 반환) | [`ReceiptFacade#completePayment`](../src/main/java/be/weskey/module/member/receipt/facade/ReceiptFacade.java) |
 | outbox 복구 레코드 (트리거 3종·상태) | [`PaymentCancelOutbox`](../src/main/java/be/weskey/shared/toss_payment/entity/PaymentCancelOutbox.java) · [`…Trigger`](../src/main/java/be/weskey/shared/toss_payment/entity/PaymentCancelTrigger.java) · [`…Status`](../src/main/java/be/weskey/shared/toss_payment/entity/PaymentCancelOutboxStatus.java) |
 | 10분 재시도 + 멀티워커 조건부 선점 | [`PaymentCancelOutboxScheduler`](../src/main/java/be/weskey/common/scheduler/PaymentCancelOutboxScheduler.java) · [`…Facade`](../src/main/java/be/weskey/shared/toss_payment/facade/PaymentCancelOutboxFacade.java) · [`…Repository#markProcessingIfPending`](../src/main/java/be/weskey/shared/toss_payment/repository/PaymentCancelOutboxRepository.java) |
