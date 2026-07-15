@@ -12,4 +12,9 @@ public class MemberMileageHistoryService {
 		int storeStockCount) {
 		throw new UnsupportedOperationException("stub");
 	}
+
+	public void saveMileageHistoryWhenCanceledReservation(Member member, String productName, Integer mileage,
+		int storeStockCount) {
+		throw new UnsupportedOperationException("stub");
+	}
 }

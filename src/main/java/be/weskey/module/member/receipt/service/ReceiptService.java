@@ -72,7 +72,7 @@ public class ReceiptService {
 		return Optional.of(existingReceipt.getId());
 	}
 
-	// 주문 준비(TX1): 주문서 저장 + recipient/storeStockReceiptMapping 저장(재고 락·차감). Toss 결제·마일리지 차감은 결제 성공 후(TX2)에 처리한다.
+	// 주문 준비(TX1): 주문서 저장 + 재고·마일리지 차감. 마일리지는 주문 생성 시점에 사용 확정한다.
 	public Receipt prepareOrder(Member member, ReceiptSaveRequest receiptSaveRequest, long totalPrice,
 		AtomicLong lockNanos) {
 
@@ -86,25 +86,21 @@ public class ReceiptService {
 		// 3. recipient 및 storeStockReceiptMapping 저장 (이 안에서 StoreStock 비관락 선점 + 재고 차감)
 		saveRecipientsAndStoreStockMappings(receipt, receiptSaveRequest.getReceiptRequests(), false);
 
+		// 4. 마일리지 차감 — 회원 비관락 선점 후 재검증해 동시 주문에도 잔액 정합성을 보장한다.
+		if (receiptSaveRequest.getMileage() > 0) {
+			Member lockedMember = memberQueryService.findByIdWithLock(member.getId());
+			processMileageUsage(lockedMember, receiptSaveRequest.getReceiptRequests(), receiptSaveRequest.getMileage(),
+				totalPrice);
+		}
+
 		return receipt;
 	}
 
-	// Toss 결제 승인(Facade) 후 TX2: receipt 에 결제정보 연결 + 마일리지 차감 + 장바구니 삭제.
-	// 멀티 트랜잭션 분리로 receipt·member 는 이전 트랜잭션에서 분리(detached)되므로 이 트랜잭션에서 재조회해 영속 상태로 다룬다.
+	// Toss 결제 승인(Facade) 후 TX2: receipt 에 결제정보 연결 + 장바구니 삭제.
 	public void completeOrder(Long receiptId, Long memberId, PaymentInfo paymentInfo,
-		ReceiptSaveRequest receiptSaveRequest, AtomicLong lockNanos) {
+		ReceiptSaveRequest receiptSaveRequest) {
 		Receipt receipt = receiptQueryService.findById(receiptId);
 		receipt.updatedPaymentInfo(paymentInfo);
-
-		// 마일리지 차감 — 비관락으로 member 를 선점한 뒤 재검증 후 차감한다.
-		// 사전검증(Facade)은 빠른 실패용이고, 동시 요청 race 에서의 정합성은 여기서 보장한다.
-		if (receiptSaveRequest.getMileage() > 0) {
-			startLockHoldMeasurement(lockNanos);
-			Member member = memberQueryService.findByIdWithLock(memberId);
-			receiptValidator.validateMileageUsage(receiptSaveRequest.getReceiptRequests(),
-				receiptSaveRequest.getMileage(), member, receiptSaveRequest.getPaymentTotalPrice());
-			deductMileage(member, receiptSaveRequest.getReceiptRequests(), receiptSaveRequest.getMileage());
-		}
 
 		deleteShoppingCart(memberId, receiptSaveRequest.getReceiptRequests());
 	}
@@ -112,7 +108,7 @@ public class ReceiptService {
 	/**
 	 * 결제 실패 보상(TX3): TX1 에서 만든 주문 흔적을 되돌린다.
 	 * 차감했던 재고를 복원하고 receipt + mapping + pickup + recipient 를 하드 삭제한다.
-	 * (마일리지는 TX2 에서만 차감되므로 보상 시 환급 대상이 아니다.)
+	 * TX1 에서 차감한 마일리지도 함께 환급한다.
 	 * 멱등 race(payment_info UNIQUE 위반) 시에도 로컬 정리는 동일하며, Toss 취소 여부 판단은 Facade 가 담당한다.
 	 */
 	public void compensate(Long receiptId) {
@@ -138,12 +134,20 @@ public class ReceiptService {
 		storeStockReceiptCommandService.deleteAll(storeStockReceiptMappings);
 		pickUpCommandService.deleteAll(pickUps);
 		recipientCommandService.deleteAll(recipients);
+		refundMileageWhenCompensating(receipt, storeStockReceiptMappings);
 		receiptCommandService.delete(receipt);
 
-		log.warn("[RECEIPT_COMPENSATED_DELETE] 결제 실패 보상 — receiptId: {} 재고 복원 및 주문 흔적 삭제 완료", receiptId);
+		log.warn("[RECEIPT_COMPENSATED_DELETE] 결제 실패 보상 — receiptId: {} 재고·마일리지 복원 및 주문 흔적 삭제 완료", receiptId);
 	}
 
-	// 마일리지 차감 + 사용 내역 저장. 검증은 호출 전에 완료되어 있어야 한다(주문 저장 흐름은 결제 전 Facade 사전검증).
+	// 예약(saveReservation) 흐름용: 마일리지 검증 + 차감을 단일 트랜잭션에서 함께 수행한다.
+	private void processMileageUsage(Member member, List<ReceiptRequest> receiptRequests, Integer mileage,
+		long totalPrice) {
+		receiptValidator.validateMileageUsage(receiptRequests, mileage, member, totalPrice);
+		deductMileage(member, receiptRequests, mileage);
+	}
+
+	// 마일리지 차감 + 사용 내역 저장. 사전 검증과 별개로 TX1 안에서 잠금 후 다시 검증한다.
 	private void deductMileage(Member member, List<ReceiptRequest> receiptRequests, Integer mileage) {
 		List<StoreStock> storeStocks = storeStockQueryService.findAllById(
 			receiptRequests.stream()
@@ -163,6 +167,22 @@ public class ReceiptService {
 		member.awardMileage(mileage * -1);
 		memberMileageHistoryService.saveMileageHistoryWhenBuyingProduct(member, mostExpensiveProductName,
 			mileage, storeStockCount);
+	}
+
+	private void refundMileageWhenCompensating(Receipt receipt,
+		List<StoreStockReceiptMapping> storeStockReceiptMappings) {
+		if (receipt.getMileage() == null || receipt.getMileage() <= 0) {
+			return;
+		}
+
+		String mostExpensiveProductName = storeStockReceiptMappings.stream()
+			.max(Comparator.comparing(mapping -> mapping.getStoreStock().getPrice()))
+			.map(mapping -> mapping.getStoreStock().getWhiskyProduct().getKoreanName())
+			.orElse("");
+
+		receipt.getMember().awardMileage(receipt.getMileage());
+		memberMileageHistoryService.saveMileageHistoryWhenCanceledReservation(receipt.getMember(),
+			mostExpensiveProductName, receipt.getMileage(), storeStockReceiptMappings.size());
 	}
 
 	private void deleteShoppingCart(Long memberIdFromJwt, List<ReceiptRequest> receiptRequests) {

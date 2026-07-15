@@ -31,8 +31,8 @@ public class ReceiptValidator {
 		throw new UnsupportedOperationException("stub");
 	}
 
-	// TX2 마일리지 차감 직전 재검증 — 비관락으로 가져온 member 기준으로 잔액·규칙을 재확인한다.
-	// 사전검증(Facade)과 TX2 사이에 다른 요청이 마일리지를 소진했을 경우를 방어한다.
+	// TX1 마일리지 차감 직전 재검증 — 비관락으로 가져온 member 기준으로 잔액·규칙을 재확인한다.
+	// 사전검증(Facade)과 TX1 사이에 다른 요청이 마일리지를 소진했을 경우를 방어한다.
 	public void validateMileageUsage(List<ReceiptRequest> receiptRequests, Integer mileage, Member member,
 		long totalPrice) {
 		throw new UnsupportedOperationException("stub");

@@ -51,8 +51,8 @@ public class ReceiptFacade {
 	 * 주문 저장 — 외부 Toss 승인을 StoreStock 비관락 트랜잭션 밖에서 수행해 락 점유 시간을 단축한다.
 	 * 분리로 잃는 자동 롤백은 보상(saga) + 기록 선행으로 보완한다.
 	 *
-	 * 사전검증(밖) → TX1(주문서·재고 차감) → approve(밖, Toss 승인) → TX2(결제정보 저장·연결·마일리지 차감·이벤트)
-	 * 실패 시 TX3 보상(재고 복원 + 주문 흔적 하드 삭제). approve 성공 후 실패면 Toss 결제도 취소한다
+	 * 사전검증(밖) → TX1(주문서·재고·마일리지 차감) → approve(밖, Toss 승인) → TX2(결제정보 저장·연결·이벤트)
+	 * 실패 시 TX3 보상(재고·마일리지 복원 + 주문 흔적 하드 삭제). approve 성공 후 실패면 Toss 결제도 취소한다
 	 * (단, payment_info UNIQUE 위반 = 동시 race 면 승자와 같은 결제를 공유하므로 Toss 취소를 하지 않는다).
 	 */
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -71,10 +71,12 @@ public class ReceiptFacade {
 		receiptValidator.validateBeforePrepareOrder(request, member, totalPrice);
 		AtomicLong lockNanos = new AtomicLong();
 
-		// 2. TX1: 주문서 저장 + 재고 락·차감 (외부 호출 없는 짧은 락 트랜잭션)
+		// 2. TX1: 주문서 저장 + 재고·마일리지 락·차감 (외부 호출 없는 짧은 락 트랜잭션)
 		Receipt receipt = transactionTemplate.execute(status ->
 			receiptService.prepareOrder(member, request, totalPrice, lockNanos));
 		Long receiptId = receipt.getId();
+		meterRegistry.timer("receipt.save.lock")
+			.record(lockNanos.get(), TimeUnit.NANOSECONDS);
 
 		// 3. approve: Toss 승인은 락 밖에서 수행한다. 실패하면 Toss 미승인이므로 결제 취소 없이 주문 흔적만 보상 삭제한다.
 		ResponseEntity<TossPaymentPaymentApprovalResponse> approvalResponse;
@@ -85,25 +87,19 @@ public class ReceiptFacade {
 			throw e;
 		}
 		// 4. TX2: 결제정보 저장·주문 확정·이벤트. 실패 시 보상(+상황별 Toss 취소), race 면 승자 receiptId 반환.
-		return completePayment(receiptId, memberId, member, approvalResponse, request, lockNanos);
+		return completePayment(receiptId, memberId, member, approvalResponse, request);
 	}
 
-	// TX2: PaymentInfo 저장 + 주문 확정(연결·마일리지·장바구니) + 이벤트 발행.
+	// TX2: PaymentInfo 저장 + 주문 확정(연결·장바구니) + 이벤트 발행.
 	// 이벤트는 NOT_SUPPORTED 경계라 AFTER_COMMIT 발화를 위해 반드시 이 트랜잭션 안에서 발행한다.
 	private Long completePayment(Long receiptId, Long memberId, Member member,
-		ResponseEntity<TossPaymentPaymentApprovalResponse> approvalResponse, ReceiptSaveRequest request,
-		AtomicLong lockNanos) {
+		ResponseEntity<TossPaymentPaymentApprovalResponse> approvalResponse, ReceiptSaveRequest request) {
 		try {
-			try {
-				transactionTemplate.executeWithoutResult(status -> {
-					PaymentInfo paymentInfo = tossPaymentService.savePaymentInfo(approvalResponse, member);
-					receiptService.completeOrder(receiptId, memberId, paymentInfo, request, lockNanos);
-					eventPublisher.publishEvent(ReceiptRequestedEvent.of(receiptId, memberId, extractStoreIds(request)));
-				});
-			} finally {
-				meterRegistry.timer("receipt.save.lock")
-					.record(lockNanos.get(), TimeUnit.NANOSECONDS);
-			}
+			transactionTemplate.executeWithoutResult(status -> {
+				PaymentInfo paymentInfo = tossPaymentService.savePaymentInfo(approvalResponse, member);
+				receiptService.completeOrder(receiptId, memberId, paymentInfo, request);
+				eventPublisher.publishEvent(ReceiptRequestedEvent.of(receiptId, memberId, extractStoreIds(request)));
+			});
 			return receiptId;
 		} catch (DataIntegrityViolationException e) {
 			// payment_info UNIQUE 위반 = 동시 race. 승자와 같은 결제를 공유하므로 Toss 취소 시 승자 결제까지 환불됨 → 취소 금지.
